@@ -1,4 +1,4 @@
-* kafka consumer tool *
+*kafka consumer tool*
 =======================
 
 Kafka consumer tool 
@@ -35,8 +35,10 @@ Usage of kafka_consumer_tool:
         JSON file containing the input details, needed for getoffsets and commitoffsets (default "topic_offsets.json")
   -offsetRetentionTime int
         Offset retention time for commitoffsets in milliseconds (default 3155760000000)
+```
 
 The schema for Input json (needed for commitoffsets and getoffsets) is as shown below:
+```json
 
 {
   "$schema": "http://json-schema.org/draft-04/schema#",

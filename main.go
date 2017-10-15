@@ -7,6 +7,8 @@ import (
 	"github.com/Shopify/sarama"
 	"io/ioutil"
 	"log"
+	"os"
+	"sort"
 	"strings"
 )
 
@@ -21,13 +23,59 @@ var (
 		fmt.Sprintf("command to execute, valid commands are: %s", strings.Join(valid_commands, ", ")))
 	offsetRet = flag.Int64("offsetRetentionTime", defaultRetentionTime,
 		"Offset retention time for commitoffsets in milliseconds")
+	topics = flag.String("topics", "testtopic", "comma-separated list of topics for which offset will"+
+		" be fetched, used when input json is not given and we want to fetch offset for all partitions")
 )
 
 type intArr [2]int64
+type intArrs []intArr
 
 type topicOffset struct {
 	Topic   string
-	Offsets []intArr
+	Offsets intArrs
+}
+
+func (in intArrs) Len() int {
+	return len(in)
+}
+
+func (in intArrs) Swap(i, j int) {
+	in[i][0], in[i][1], in[j][0], in[j][1] = in[j][0], in[j][1], in[i][0], in[i][1]
+}
+
+func (in intArrs) Less(i, j int) bool {
+	if in[i][0] != in[j][0] {
+		return in[i][0] < in[j][0]
+	}
+	return in[i][1] < in[j][1]
+}
+
+type stringArr []string
+
+func (in stringArr) Len() int {
+	return len(in)
+}
+
+func (in stringArr) Swap(i, j int) {
+	in[i], in[j] = in[j], in[i]
+}
+
+func (in stringArr) Less(i, j int) bool {
+	return strings.Compare(in[i], in[j]) < 0
+}
+
+type int32Arr []int32
+
+func (in int32Arr) Len() int {
+	return len(in)
+}
+
+func (in int32Arr) Swap(i, j int) {
+	in[i], in[j] = in[j], in[i]
+}
+
+func (in int32Arr) Less(i, j int) bool {
+	return in[i] < in[j]
 }
 
 func getGroupJoinRequest(consumerGrop string) *sarama.JoinGroupRequest {
@@ -73,29 +121,49 @@ func printOffsetFetchResponse(resp *sarama.OffsetFetchResponse) {
 	if resp == nil {
 		return
 	}
+	var topics stringArr
+	var partitions int32Arr
+	for k, _ := range resp.Blocks {
+		topics = append(topics, k)
+	}
+	sort.Sort(topics)
 	log.Print("Current offset details:")
-	for topic, offpartions := range resp.Blocks {
-		for part, offr := range offpartions {
-			log.Printf("Topic: %s, Partition: %d, Offset: %d", topic, part, offr.Offset)
+	for _, topic := range topics {
+		for partition, _ := range resp.Blocks[topic] {
+			partitions = append(partitions, partition)
 		}
-
+		sort.Sort(partitions)
+		for _, partition := range partitions {
+			log.Printf("Topic: %s, Partition: %d, Offset: %d", topic, partition,
+				resp.Blocks[topic][partition].Offset)
+		}
+		partitions = partitions[:0]
 	}
 }
 
 func main() {
 	flag.Parse()
 	var poffsets []topicOffset
+	getalloffsets := false
 	if *command != "listconsumers" {
-		file_data, err := ioutil.ReadFile(*inputjson)
-		if err != nil {
-			log.Fatalf("File read, %v", err)
-		}
-		if !validate(file_data) {
-			log.Fatal("Error validating json")
-		}
-		err = json.Unmarshal(file_data, &poffsets)
-		if err != nil {
-			log.Fatalf("Error decoding json file %v", err)
+		_, err := os.Stat(*inputjson)
+		if os.IsNotExist(err) {
+			if *command != "getoffsets" {
+				log.Fatal("Input json is required")
+			}
+			getalloffsets = true
+		} else {
+			file_data, err := ioutil.ReadFile(*inputjson)
+			if err != nil {
+				log.Fatalf("File read, %v", err)
+			}
+			if !validate(file_data) {
+				log.Fatal("Error validating json")
+			}
+			err = json.Unmarshal(file_data, &poffsets)
+			if err != nil {
+				log.Fatalf("Error decoding json file %v", err)
+			}
 		}
 	}
 	broker_list := strings.Split(*brokers, ",")
@@ -144,6 +212,36 @@ func main() {
 	}
 
 	if *command == "getoffsets" {
+		if getalloffsets {
+			topic_list := strings.Split(*topics, ",")
+			mdr, err := broker.GetMetadata(&sarama.MetadataRequest{Topics: topic_list})
+			if err != nil {
+				log.Fatalf("Unable to fetch metadata for topic %s", topics)
+			}
+			var t topicOffset
+			for _, tmdr := range mdr.Topics {
+				if tmdr.Err != sarama.ErrNoError {
+					log.Printf("Couldn't fetch metadata for %s", tmdr.Name)
+					continue
+				}
+				t.Topic = tmdr.Name
+				t.Offsets = []intArr{}
+				for _, pmdr := range tmdr.Partitions {
+					if pmdr.Err != sarama.ErrNoError {
+						log.Printf("Some error for partition %d for topic %s", pmdr.ID, t.Topic)
+						continue
+					}
+					t.Offsets = append(t.Offsets, [2]int64{int64(pmdr.ID), 0})
+				}
+				if len(t.Offsets) > 0 {
+					sort.Sort(t.Offsets)
+					poffsets = append(poffsets, t)
+				}
+			}
+		}
+		if len(poffsets) == 0 {
+			log.Fatalf("Empty topic or partition list for getting offsets")
+		}
 		offr := &sarama.OffsetFetchRequest{ConsumerGroup: *consumergroup, Version: 1}
 		for _, offsetdata := range poffsets {
 			for _, off := range offsetdata.Offsets {

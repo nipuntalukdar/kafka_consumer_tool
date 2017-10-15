@@ -50,20 +50,6 @@ func (in intArrs) Less(i, j int) bool {
 	return in[i][1] < in[j][1]
 }
 
-type stringArr []string
-
-func (in stringArr) Len() int {
-	return len(in)
-}
-
-func (in stringArr) Swap(i, j int) {
-	in[i], in[j] = in[j], in[i]
-}
-
-func (in stringArr) Less(i, j int) bool {
-	return strings.Compare(in[i], in[j]) < 0
-}
-
 type int32Arr []int32
 
 func (in int32Arr) Len() int {
@@ -121,12 +107,12 @@ func printOffsetFetchResponse(resp *sarama.OffsetFetchResponse) {
 	if resp == nil {
 		return
 	}
-	var topics stringArr
+	var topics []string
 	var partitions int32Arr
 	for k, _ := range resp.Blocks {
 		topics = append(topics, k)
 	}
-	sort.Sort(topics)
+	sort.Strings(topics)
 	log.Print("Current offset details:")
 	for _, topic := range topics {
 		for partition, _ := range resp.Blocks[topic] {

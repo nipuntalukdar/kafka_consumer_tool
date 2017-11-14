@@ -14,7 +14,7 @@ import (
 
 var (
 	defaultRetentionTime int64 = 36525 * 86400000 // almost 100 years
-	valid_commands             = []string{"commitoffsets", "getoffsets", "listconsumers"}
+	valid_commands             = []string{"commitoffsets", "getoffsets", "listconsumers", "listgroups", "listtopics", "listbrokers"}
 	brokers                    = flag.String("brokers", "127.0.0.1:9092", "Bootstrap brokers comma separated list")
 	consumergroup              = flag.String("consumergroup", "testgroup", "consumer group name")
 	inputjson                  = flag.String("inputjson", "topic_offsets.json",
@@ -62,6 +62,48 @@ func (in int32Arr) Swap(i, j int) {
 
 func (in int32Arr) Less(i, j int) bool {
 	return in[i] < in[j]
+}
+
+func listGroups(client sarama.Client, conf *sarama.Config) bool {
+	brokers := client.Brokers()
+	ret := false
+	for _, br := range brokers {
+		if err := br.Open(conf); err != nil && err != sarama.ErrAlreadyConnected {
+			log.Printf("Error in opening broker %v, %v", br, err)
+			continue
+		}
+		groups, err := br.ListGroups(&sarama.ListGroupsRequest{})
+		if err != nil || groups.Err != sarama.ErrNoError {
+			br.Close()
+			continue
+		}
+		ret = true
+		for group, _ := range groups.Groups {
+			log.Printf("Group: %s\n", group)
+		}
+		br.Close()
+	}
+	return ret
+}
+
+func listTopics(client sarama.Client) bool {
+	topics, err := client.Topics()
+	if err != nil {
+		log.Printf("Couldn't list topics: %v", err)
+		return false
+	}
+	for _, topic := range topics {
+		log.Printf("Topic:%s \n", topic)
+	}
+	return true
+}
+
+func listBrokers(client sarama.Client) bool {
+	brokers := client.Brokers()
+	for _, broker := range brokers {
+		log.Printf("Broker Id:%d, addr:%s  \n", broker.ID(), broker.Addr())
+	}
+	return true
 }
 
 func getGroupJoinRequest(consumerGrop string) *sarama.JoinGroupRequest {
@@ -240,8 +282,7 @@ func main() {
 		}
 		printOffsetFetchResponse(offsetdetails)
 		return
-	}
-	if *command == "commitoffsets" {
+	} else if *command == "commitoffsets" {
 		jr, err := broker.JoinGroup(getGroupJoinRequest(*consumergroup))
 		if err != nil {
 			log.Fatalf("Died %v", err)
@@ -256,5 +297,11 @@ func main() {
 			log.Fatalf("Died %v", err)
 		}
 		commitOffsets(broker, *consumergroup, jr.GenerationId, jr.MemberId, poffsets)
+	} else if *command == "listgroups" {
+		listGroups(client, conf)
+	} else if *command == "listtopics" {
+		listTopics(client)
+	} else if *command == "listbrokers" {
+		listBrokers(client)
 	}
 }

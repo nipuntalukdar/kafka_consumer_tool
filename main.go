@@ -173,7 +173,7 @@ func main() {
 	flag.Parse()
 	var poffsets []topicOffset
 	getalloffsets := false
-	if *command != "listconsumers" {
+	if *command == "getoffsets" || *command == "commitoffsets" {
 		_, err := os.Stat(*inputjson)
 		if os.IsNotExist(err) {
 			if *command != "getoffsets" {
